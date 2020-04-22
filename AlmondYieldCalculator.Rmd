@@ -1,0 +1,379 @@
+---
+title: "almond yield"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r start}
+#Setup
+source("Almond_Yield.R") #the function
+
+#function needs to:
+  #for all years of data it receives:
+	#return the almond yield anomaly
+  #return max and min yield [yield anomaly?] out of all years
+
+#testing - can remove this later
+test_mintemp = c(0,5,3,10,20)
+test_precip = c(120,300,500,600,800)
+test = Almond_Yield(test_mintemp,test_precip)
+#this appears to work properly though
+
+
+```
+
+```{r clim}
+#estimate almond yield anomalies from clim.txt climate data
+clim = read.delim("clim.txt",header = TRUE, sep = " ") #import data
+
+#get the data we care about - for now that's the February minimum temperature and the (total) January precipitation for each year
+
+#years are 1988 to 2010, but 1988 has no data for Jan or Feb
+data = list(years = c(1989:2010), precip = (NA), mintemp = (NA)) #create the start of a data list for this
+
+
+  #get the desired data for each year in the dataset
+ 
+  #what we ultimately want is just 2 strings (vectors) of numbers in the order of the years
+current_row = 1
+while(current_row <= dim(clim)[1]){
+ 
+#for each row:
+  #determine the year of the row, and send to that year
+  current_year = clim[current_row,4]
+  data_index = current_year - 1988 #index for precip and mintemp values
+  current_month = clim[current_row,3]
+  #if the month is january:
+  if (current_month == 1){
+	#if there's actually data for this year in January, set the value to 0 if it's currently NA
+	if (is.na(data$precip[data_index])) {
+  	data$precip[data_index] = 0
+	}
+    
+	#add the row's precipitation to the precipitation for this year
+	#precip for this year = precip for this year + this row's precip column value
+	data$precip[data_index] = data$precip[data_index] + clim[current_row,8]
+  }
+    
+  #if the month is february:
+  if (current_month == 2) {
+	row_mintemp = clim[current_row,7] #get current row's min temp
+    
+	#if the min temperature is lower than the previous stored min temperature or if none is stored, then store it
+	#as min temperature for this year  
+	if (row_mintemp < data$mintemp[data_index] | is.na(data$mintemp[data_index])){
+  	data$mintemp[data_index] = row_mintemp
+	}
+    
+  }
+  current_row = current_row + 1
+}
+
+
+
+
+result_clim = Almond_Yield(data$mintemp,data$precip)
+result_clim
+result_clim_plottable = data.frame(data$years,result_clim$yield) #makes this a plottable dataframe; perhaps the function should do this if provided with a vector of the years?
+colnames(result_clim_plottable) = c("year","yield")
+
+
+
+
+#graph the results
+
+ggplot(result_clim_plottable,aes(year,yield, fill = yield))+
+  geom_point()+
+  labs(x = "Year", y = "Yield Anomaly (tons/acre)", title = "Yearly modeled yield anomaly, for default data") +
+  theme_bw()
+
+
+#this might or might not work - as far as I can tell it does but I wrote it at 11:45 PM
+#it is incomplete if we want to do the extra credit, and is also unpolished
+
+#what does she mean by 'error checking?' I have been testing it for errors along the way but it seems like she wants to see code that does that.
+
+```
+
+```{r clim +2}
+#only wants for if the last 20 years had been 2 deg C warmer, but there are 22 years with data in the dataset
+
+#increase the min temp value for the last 20 years in the dataset by 2:
+data2 = data
+
+
+data2$mintemp[3:22] = sapply(data$mintemp[3:22],function(input_){newdata = input_ + 2; return(newdata)})
+
+#redo the analysis
+
+result_clim2 = Almond_Yield(data2$mintemp,data2$precip)
+result_clim2
+result_clim2_plottable = data.frame(data2$years,result_clim2$yield) #makes this a plottable dataframe; perhaps the function should do this if provided with a vector of the years?
+colnames(result_clim2_plottable) = c("year","yield")
+
+
+
+
+#graph the results
+
+ggplot(result_clim2_plottable,aes(year,yield, fill = yield))+
+  geom_point()+
+  labs(x = "Year", y = "Yield Anomaly (tons/acre)", title = "Yearly modeled yield anomaly, for 2 degrees C warmer min temperature \nfor the last 20 years of data") +
+  theme_bw()
+
+
+#despite appearances they ARE different:
+result_clim_plottable - result_clim2_plottable #the values in column 2 (the yield) are slightly changed while column 1 (year) is unchanged
+```
+
+``` {r clim +2 show mean}
+#what this part actually wants is the MEAN annual yield anomaly under these conditions
+
+c("+2 deg C","Default")
+c(result_clim2$meanyield,result_clim$meanyield) #they are also different
+
+
+```
+
+
+``` {r param vary}
+#Vary one of the parameter by sampling from a normal distribution with mean the value from Lobell et al., (2006) and standard deviation 10% of the mean -  create a box plot of  mean annual yield anomaly for baseline and 2C climate (where boxes show variation due to uncertanty in the parameter)
+
+#ultimately should be creating a boxplot with 2 boxes: baseline case and +2 deg C case
+
+#which parameter should we vary?
+#inputs are what it's a function of (min temp and precip); parameters are all the other stuff
+
+#let's vary the first coefficient (0.015 in -0.015Tn,2)
+var_times = 50
+param_vary = rnorm(mean=-0.015,sd = 0.0015, n=var_times) #it's "-0.015" the way the yield function codes it
+
+
+
+#now we want to run the model for each parameter value, for both climate conditions
+#however we specifically want the mean anomaly
+
+result_pvary = sapply(param_vary,function(f) {Almond_Yield(data$mintemp,data$precip,f)})[4,] #we only want the timeseries from the model for each of the 50 runs
+result_pvary2 = sapply(param_vary,function(f) {Almond_Yield(data2$mintemp,data2$precip,f)})[4,] #we only want the timeseries from the model for each of the 50 runs
+
+#get just the numbers
+result_pvary = unname(unlist(result_pvary))
+result_pvary2 = unname(unlist(result_pvary2))
+
+result_pvary = append(result_pvary,result_pvary2)
+
+#create a data frame marking each number as being either default or plus2c
+categ = c("Default")
+categ[1:50] = c("Default")
+categ[51:100] = c("+ 2 deg C")
+
+result_pvary_plottable = data.frame(categ,result_pvary)
+
+colnames(result_pvary_plottable) = c("Category","Mean_Anomaly")
+
+ggplot(result_pvary_plottable,aes(Category,Mean_Anomaly))+
+  geom_boxplot()+
+  labs(x = " ",y = "Mean Annual Yield Anomaly (tons/acre)", title = "Variation in mean yield anomaly for default and elevated temperature,\nwith variation in the linear temperature coefficient") +
+  theme_bw()
+
+
+```
+
+---
+title: "almond yield"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r start}
+#Setup
+source("Almond_Yield.R") #the function
+
+#function needs to:
+  #for all years of data it receives:
+	#return the almond yield anomaly
+  #return max and min yield [yield anomaly?] out of all years
+
+#testing - can remove this later
+test_mintemp = c(0,5,3,10,20)
+test_precip = c(120,300,500,600,800)
+test = Almond_Yield(test_mintemp,test_precip)
+#this appears to work properly though
+
+
+```
+
+```{r clim}
+#estimate almond yield anomalies from clim.txt climate data
+clim = read.delim("clim.txt",header = TRUE, sep = " ") #import data
+
+#get the data we care about - for now that's the February minimum temperature and the (total) January precipitation for each year
+
+#years are 1988 to 2010, but 1988 has no data for Jan or Feb
+data = list(years = c(1989:2010), precip = (NA), mintemp = (NA)) #create the start of a data list for this
+
+
+  #get the desired data for each year in the dataset
+ 
+  #what we ultimately want is just 2 strings (vectors) of numbers in the order of the years
+current_row = 1
+while(current_row <= dim(clim)[1]){
+ 
+#for each row:
+  #determine the year of the row, and send to that year
+  current_year = clim[current_row,4]
+  data_index = current_year - 1988 #index for precip and mintemp values
+  current_month = clim[current_row,3]
+  #if the month is january:
+  if (current_month == 1){
+	#if there's actually data for this year in January, set the value to 0 if it's currently NA
+	if (is.na(data$precip[data_index])) {
+  	data$precip[data_index] = 0
+	}
+    
+	#add the row's precipitation to the precipitation for this year
+	#precip for this year = precip for this year + this row's precip column value
+	data$precip[data_index] = data$precip[data_index] + clim[current_row,8]
+  }
+    
+  #if the month is february:
+  if (current_month == 2) {
+	row_mintemp = clim[current_row,7] #get current row's min temp
+    
+	#if the min temperature is lower than the previous stored min temperature or if none is stored, then store it
+	#as min temperature for this year  
+	if (row_mintemp < data$mintemp[data_index] | is.na(data$mintemp[data_index])){
+  	data$mintemp[data_index] = row_mintemp
+	}
+    
+  }
+  current_row = current_row + 1
+}
+
+
+
+
+result_clim = Almond_Yield(data$mintemp,data$precip)
+result_clim_plottable = data.frame(data$years,result_clim$yield) #makes this a plottable dataframe; perhaps the function should do this if provided with a vector of the years?
+colnames(result_clim_plottable) = c("year","yield")
+
+
+
+
+#graph the results
+
+ggplot(result_clim_plottable,aes(year,yield, fill = yield))+
+  geom_point()+
+  labs(x = "Year", y = "Yield Anomaly (tons/acre)", title = "Yearly modeled yield anomaly, for default data") +
+  theme_bw()
+
+
+#this might or might not work - as far as I can tell it does but I wrote it at 11:45 PM
+#it is incomplete if we want to do the extra credit, and is also unpolished
+
+#what does she mean by 'error checking?' I have been testing it for errors along the way but it seems like she wants to see code that does that.
+
+```
+
+```{r clim +2}
+#only wants for if the last 20 years had been 2 deg C warmer, but there are 22 years with data in the dataset
+
+#increase the min temp value for the last 20 years in the dataset by 2:
+data2 = data
+
+
+data2$mintemp[3:22] = sapply(data$mintemp[3:22],function(input_){newdata = input_ + 2; return(newdata)})
+
+#redo the analysis
+
+result_clim2 = Almond_Yield(data2$mintemp,data2$precip)
+result_clim2_plottable = data.frame(data2$years,result_clim2$yield) #makes this a plottable dataframe; perhaps the function should do this if provided with a vector of the years?
+colnames(result_clim2_plottable) = c("year","yield")
+
+
+
+
+#graph the results
+
+ggplot(result_clim2_plottable,aes(year,yield, fill = yield))+
+  geom_point()+
+  labs(x = "Year", y = "Yield Anomaly (tons/acre)", title = "Yearly modeled yield anomaly, for 2 degrees C warmer min temperature \nfor the last 20 years of data") +
+  theme_bw()
+
+
+#despite appearances they ARE different:
+result_clim_plottable - result_clim2_plottable #the values in column 2 (the yield) are slightly changed while column 1 (year) is unchanged
+
+#what this part actually wants is the MEAN annual yield anomaly under these conditions
+
+c("+2 deg C","Default")
+c(result_clim2$meanyield,result_clim$meanyield) #they are also different
+
+
+```
+
+
+``` {r param vary}
+#Vary one of the parameter by sampling from a normal distribution with mean the value from Lobell et al., (2006) and standard deviation 10% of the mean -  create a box plot of  mean annual yield anomaly for baseline and 2C climate (where boxes show variation due to uncertanty in the parameter)
+
+#ultimately should be creating a boxplot with 2 boxes: baseline case and +2 deg C case
+
+#which parameter should we vary?
+#inputs are what it's a function of (min temp and precip); parameters are all the other stuff
+
+#let's vary the first coefficient (0.015 in -0.015Tn,2)
+var_times = 50
+param_vary = rnorm(mean=-0.015,sd = 0.0015, n=var_times) #it's "-0.015" the way the yield function codes it
+
+
+
+#now we want to run the model for each parameter value, for both climate conditions
+#however we specifically want the mean anomaly
+
+result_pvary = sapply(param_vary,function(f) {Almond_Yield(data$mintemp,data$precip,f)})[4,] #we only want the timeseries from the model for each of the 50 runs
+result_pvary2 = sapply(param_vary,function(f) {Almond_Yield(data2$mintemp,data2$precip,f)})[4,] #we only want the timeseries from the model for each of the 50 runs
+
+#get just the numbers
+result_pvary = unname(unlist(result_pvary))
+result_pvary2 = unname(unlist(result_pvary2))
+
+result_pvary = append(result_pvary,result_pvary2)
+
+#create a data frame marking each number as being either default or plus2c
+categ = c("Default")
+categ[1:50] = c("Default")
+categ[51:100] = c("+ 2 deg C")
+
+result_pvary_plottable = data.frame(categ,result_pvary)
+
+colnames(result_pvary_plottable) = c("Category","Mean_Anomaly")
+
+ggplot(result_pvary_plottable,aes(Category,Mean_Anomaly))+
+  geom_boxplot()+
+  labs(x = " ",y = "Mean Annual Yield Anomaly (tons/acre)", title = "Variation in mean yield anomaly for default and elevated temperature,\nwith variation in the linear temperature coefficient") +
+  theme_bw()
+
+
+```
